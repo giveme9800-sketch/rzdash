@@ -18,6 +18,18 @@
         .dashboard-container { max-width: 90rem; }
         .stat-card { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06); }
         .upload-progress-bar { height: 8px; transition: width 0.3s; }
+        
+        /* Mobile-specific fix for main content scrolling */
+        @media (max-width: 767px) {
+            #dashboard-content {
+                /* Ensures main content takes full width and sidebar sits above/off-screen */
+                flex-direction: column;
+                position: relative; 
+            }
+            #main-content-wrapper {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
@@ -41,7 +53,7 @@
             firebase.initializeApp(firebaseConfig);
             db = firebase.firestore();
             auth = firebase.auth(); 
-            storage = firebase.storage(); // Initialize Storage - NEW
+            storage = firebase.storage();
             console.log("Firebase initialized for Admin Dashboard.");
         } catch (error) {
             console.error("Firebase initialization failed:", error);
@@ -68,9 +80,16 @@
     </div>
 
 
-    <div id="dashboard-content" class="hidden flex h-screen">
+    <div id="dashboard-content" class="hidden md:flex h-screen">
         
-        <div class="w-64 bg-gray-800 text-white flex flex-col">
+        <div class="md:hidden bg-white p-4 flex justify-between items-center shadow-md sticky top-0 z-40">
+            <h1 class="text-xl font-bold">CoreTick Admin</h1>
+            <button id="menu-toggle-btn" onclick="toggleSidebar()" class="text-gray-800">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" /></svg>
+            </button>
+        </div>
+        
+        <div id="sidebar" class="w-64 bg-gray-800 text-white flex flex-col fixed inset-y-0 left-0 transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 z-50">
             <h1 class="text-2xl font-bold p-6 border-b border-gray-700">CoreTick Admin</h1>
             <nav class="flex-1 p-4 space-y-2">
                 <a href="#" class="block px-4 py-2 rounded hover:bg-gray-700 transition" onclick="showPanel('overview')">🧭 Overview</a>
@@ -81,12 +100,12 @@
                 <button onclick="adminLogout()" class="w-full text-left px-4 py-2 bg-red-600 rounded hover:bg-red-700 transition">Log Out</button>
             </div>
         </div>
-
-        <div class="flex-1 overflow-y-auto bg-gray-50 p-8">
-            <h2 class="text-4xl font-bold mb-8">Dashboard Overview</h2>
+        
+        <div id="main-content-wrapper" class="flex-1 overflow-y-auto bg-gray-50 p-8 pt-4">
+            <h2 class="text-4xl font-bold mb-8 md:block hidden">Dashboard Overview</h2>
 
             <div id="overview-panel" class="dashboard-panel space-y-10">
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                     <div class="stat-card bg-white p-5 rounded-lg border-l-4 border-black">
                         <p class="text-sm text-gray-500">Total Revenue</p>
                         <p id="total-revenue" class="text-3xl font-bold mt-1">PKR 0.00</p>
@@ -254,7 +273,20 @@
 
     <script>
         let currentEditingProductId = null;
-        let salesChartInstance = null; 
+        let salesChartInstance = null;
+        let isSidebarOpen = false;
+
+        // --- Responsive Toggle Function ---
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            isSidebarOpen = !isSidebarOpen;
+            
+            if (isSidebarOpen) {
+                sidebar.classList.remove('-translate-x-full');
+            } else {
+                sidebar.classList.add('-translate-x-full');
+            }
+        }
 
         // --- Auth Functions ---
         function adminLogin(e) {
@@ -284,7 +316,10 @@
         auth.onAuthStateChanged(user => {
             if (user) {
                 document.getElementById('login-screen').classList.add('hidden');
-                document.getElementById('dashboard-content').classList.remove('hidden');
+                // Ensure dashboard is visible on login, even on mobile
+                document.getElementById('dashboard-content').classList.remove('hidden', 'md:flex');
+                document.getElementById('dashboard-content').classList.add('flex');
+                
                 // Start loading dynamic data once authenticated
                 loadDashboardData(); 
             } else {
@@ -299,6 +334,11 @@
                 panel.classList.add('hidden');
             });
             document.getElementById(panelId + '-panel').classList.remove('hidden');
+            
+            // Close sidebar automatically on mobile navigation
+            if (window.innerWidth < 768) {
+                toggleSidebar();
+            }
         }
         
         // --- Data Fetching and Real-Time Listeners ---
@@ -368,19 +408,16 @@
             const chartLabels = [];
             const chartData = [];
             
-            // 1. Generate the last 7 dates and initialize data array
             for (let i = daysToShow - 1; i >= 0; i--) {
                 const date = new Date();
                 date.setDate(date.getDate() - i);
                 
                 const dateString = date.toISOString().split('T')[0];
                 
-                // Use a user-friendly label (e.g., "Mon, 2/Nov")
                 const label = date.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
                 
                 chartLabels.push(label);
                 
-                // Get revenue for that date, default to 0 if no orders exist
                 const revenue = dailyRevenue[dateString] || 0;
                 chartData.push(revenue);
             }
@@ -416,23 +453,19 @@
                 }
             };
 
-            // 2. Check if chart exists, if so, destroy/update it
             if (salesChartInstance) {
-                // Update the data in the existing chart instance
                 salesChartInstance.data.labels = chartLabels;
                 salesChartInstance.data.datasets[0].data = chartData;
                 salesChartInstance.update();
             } else {
-                // Create a new chart instance and save it globally
                 salesChartInstance = new Chart(ctx, config);
             }
         }
         
-        // --- Firebase Storage Upload Utility (NEW) ---
+        // --- Firebase Storage Upload Utility ---
         async function uploadFile(file, type, productId) {
             if (!file) return null;
             
-            // Determine the file path
             const filePath = `products/${productId}/${type}-${file.name}`;
             const storageRef = storage.ref(filePath);
             const uploadTask = storageRef.put(file);
@@ -440,19 +473,16 @@
             return new Promise((resolve, reject) => {
                 uploadTask.on('state_changed', 
                     (snapshot) => {
-                        // Observe state change events such as progress, pause, and resume
                         const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
                         const progressBarId = type === 'img' ? 'progress-img' : 'progress-img2';
                         const progressBar = document.querySelector(`#${progressBarId} > div`);
                         if (progressBar) progressBar.style.width = progress + '%';
                     }, 
                     (error) => {
-                        // Handle unsuccessful uploads
                         console.error(`Upload failed for ${type}:`, error);
                         reject(error);
                     }, 
                     () => {
-                        // Handle successful uploads
                         uploadTask.snapshot.ref.getDownloadURL().then((downloadURL) => {
                             resolve(downloadURL);
                         });
@@ -496,7 +526,6 @@
             form.reset();
             currentEditingProductId = productId;
             
-            // Reset progress bars and file inputs on open
             document.getElementById('product-img-file').required = (mode === 'add');
             document.querySelector('#progress-img > div').style.width = '0%';
             document.querySelector('#progress-img2 > div').style.width = '0%';
@@ -507,7 +536,6 @@
                 document.getElementById('product-img2').value = '';
             } else {
                 titleEl.textContent = 'Edit Product';
-                // Fetch product data and populate form fields
                 db.collection('products').doc(productId).get().then(doc => {
                     if (doc.exists) {
                         const data = doc.data();
@@ -516,7 +544,6 @@
                         document.getElementById('product-stock').value = data.stock;
                         document.getElementById('product-featured').checked = data.featured;
                         
-                        // Set current URLs in hidden fields for non-image updates
                         document.getElementById('product-img').value = data.img;
                         document.getElementById('product-img2').value = data.img2 || '';
                         
@@ -533,7 +560,6 @@
             document.getElementById('product-modal-overlay').classList.remove('flex');
         }
 
-        // --- Handle Product Submission (UPDATED ASYNC FUNCTION) ---
         document.getElementById('product-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -544,27 +570,23 @@
             const primaryFile = document.getElementById('product-img-file').files[0];
             const secondaryFile = document.getElementById('product-img2-file').files[0];
 
-            let productId = currentEditingProductId || db.collection('products').doc().id; // Pre-generate ID if adding new
+            let productId = currentEditingProductId || db.collection('products').doc().id;
             
-            let primaryUrl = document.getElementById('product-img').value; // Existing URL
-            let secondaryUrl = document.getElementById('product-img2').value; // Existing URL
+            let primaryUrl = document.getElementById('product-img').value;
+            let secondaryUrl = document.getElementById('product-img2').value;
 
             try {
-                // 1. Upload Primary Image if a new file is selected
                 if (primaryFile) {
                     primaryUrl = await uploadFile(primaryFile, 'img', productId);
                 } else if (!primaryUrl) {
-                    // Check if URL is empty AND no file was uploaded (only relevant for new products)
                     alert("Please upload a primary image.");
                     throw new Error("Missing primary image.");
                 }
 
-                // 2. Upload Secondary Image if selected
                 if (secondaryFile) {
                     secondaryUrl = await uploadFile(secondaryFile, 'img2', productId);
                 }
 
-                // 3. Prepare final product data
                 const productData = {
                     name: document.getElementById('product-name').value,
                     price: parseFloat(document.getElementById('product-price').value),
@@ -575,7 +597,6 @@
                     description: document.getElementById('product-description').value,
                 };
 
-                // 4. Save to Firestore
                 if (currentEditingProductId) {
                     await db.collection('products').doc(currentEditingProductId).update(productData);
                     console.log("Product updated successfully!");
@@ -714,7 +735,6 @@
         }
         
         // --- Chart Functions ---
-        // (Unchanged from previous successful update)
         function updateSalesChart(dailyRevenue) {
             const ctx = document.getElementById('salesChart').getContext('2d');
             const daysToShow = 7;
