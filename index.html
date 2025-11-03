@@ -95,6 +95,7 @@
                 <a href="#" class="block px-4 py-2 rounded hover:bg-gray-700 transition" onclick="showPanel('overview')">🧭 Overview</a>
                 <a href="#" class="block px-4 py-2 rounded hover:bg-gray-700 transition" onclick="showPanel('products')">🛍️ Products</a>
                 <a href="#" class="block px-4 py-2 rounded hover:bg-gray-700 transition" onclick="showPanel('orders')">📦 Orders</a>
+                <a href="#" class="block px-4 py-2 rounded hover:bg-gray-700 transition" onclick="showPanel('analytics')">📊 Analytics</a>
             </nav>
             <div class="p-4 border-t border-gray-700">
                 <button onclick="adminLogout()" class="w-full text-left px-4 py-2 bg-red-600 rounded hover:bg-red-700 transition">Log Out</button>
@@ -174,6 +175,16 @@
                     </table>
                 </div>
             </div>
+            
+            <div id="analytics-panel" class="dashboard-panel hidden">
+                <h3 class="text-2xl font-semibold mb-6">📊 Top 5 Best-Selling Products</h3>
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h4 class="font-semibold text-xl mb-3 border-b pb-1">Ranked by Quantity Sold (All Time)</h4>
+                    <ul id="best-seller-list" class="space-y-3">
+                        <li class="text-gray-500">Processing sales data...</li>
+                    </ul>
+                </div>
+            </div>
 
         </div>
     </div>
@@ -195,7 +206,7 @@
                 </div>
                 
                 <div class="mb-4 p-3 border rounded-lg">
-                    <label for="product-img-file" class="block text-sm font-medium text-gray-700 mb-2">Primary Image (Required)</label>
+                    <label for="product-img-file" class="block text-sm font-medium text-gray-700 mb-2">Primary Image (Required on Add, Optional on Edit)</label>
                     <input type="file" id="product-img-file" accept="image/*" class="w-full mb-2">
                     <input type="hidden" id="product-img"> <div id="progress-img" class="upload-progress-bar bg-gray-200 rounded-full overflow-hidden">
                         <div class="h-full bg-green-500" style="width: 0%"></div>
@@ -316,11 +327,9 @@
         auth.onAuthStateChanged(user => {
             if (user) {
                 document.getElementById('login-screen').classList.add('hidden');
-                // Ensure dashboard is visible on login, even on mobile
                 document.getElementById('dashboard-content').classList.remove('hidden', 'md:flex');
                 document.getElementById('dashboard-content').classList.add('flex');
                 
-                // Start loading dynamic data once authenticated
                 loadDashboardData(); 
             } else {
                 document.getElementById('login-screen').classList.remove('hidden');
@@ -335,7 +344,6 @@
             });
             document.getElementById(panelId + '-panel').classList.remove('hidden');
             
-            // Close sidebar automatically on mobile navigation
             if (window.innerWidth < 768) {
                 toggleSidebar();
             }
@@ -350,17 +358,15 @@
                 const totalRevenueEl = document.getElementById('total-revenue');
                 
                 let totalRevenue = 0;
-                let dailyRevenue = {}; // { 'YYYY-MM-DD': revenue }
+                let dailyRevenue = {}; 
 
                 snapshot.docs.forEach(doc => {
                     const data = doc.data();
                     
-                    // Calculate total revenue
                     if (typeof data.total === 'number') {
                          totalRevenue += data.total;
                     }
                     
-                    // Group orders by date for the chart
                     if (data.createdAt && data.total) {
                         const date = data.createdAt.toDate().toISOString().split('T')[0];
                         dailyRevenue[date] = (dailyRevenue[date] || 0) + data.total;
@@ -370,11 +376,9 @@
                 totalOrdersEl.textContent = snapshot.size;
                 totalRevenueEl.textContent = `PKR ${totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
                 
-                // Pass the calculated data to the chart function
                 updateSalesChart(dailyRevenue); 
-                
-                // RENDER ORDERS TABLE
                 renderOrdersTable(snapshot.docs);
+                renderBestSellers(snapshot.docs); // Call the Analytics function
             });
 
             // 2. Load Product Stats & Table (Real-time listener)
@@ -395,7 +399,6 @@
                 
                 activeProductsEl.textContent = activeCount;
                 outOfStockEl.textContent = outOfStockCount;
-                // RENDER PRODUCTS TABLE
                 renderProductsTable(snapshot.docs);
             });
         }
@@ -411,13 +414,9 @@
             for (let i = daysToShow - 1; i >= 0; i--) {
                 const date = new Date();
                 date.setDate(date.getDate() - i);
-                
                 const dateString = date.toISOString().split('T')[0];
-                
                 const label = date.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
-                
                 chartLabels.push(label);
-                
                 const revenue = dailyRevenue[dateString] || 0;
                 chartData.push(revenue);
             }
@@ -490,6 +489,71 @@
                 );
             });
         }
+        
+        // --- Analytics Functions ---
+        function renderBestSellers(docs) {
+            const listEl = document.getElementById('best-seller-list');
+            if (!listEl) return;
+            listEl.innerHTML = ''; 
+
+            // 1. Aggregate Sales Data
+            let salesMap = new Map(); 
+
+            docs.forEach(doc => {
+                const order = doc.data();
+                if (order.items) {
+                    order.items.forEach(item => {
+                        const quantity = item.quantity || 0;
+                        const price = item.price || 0;
+                        const revenue = quantity * price;
+
+                        if (salesMap.has(item.id)) {
+                            const existing = salesMap.get(item.id);
+                            existing.totalQuantity += quantity;
+                            existing.totalRevenue += revenue;
+                        } else {
+                            salesMap.set(item.id, {
+                                name: item.title,
+                                totalQuantity: quantity,
+                                totalRevenue: revenue,
+                                id: item.id
+                            });
+                        }
+                    });
+                }
+            });
+
+            // 2. Sort and Limit
+            const sortedProducts = Array.from(salesMap.values())
+                .sort((a, b) => b.totalQuantity - a.totalQuantity) 
+                .slice(0, 5); 
+
+            // 3. Render List
+            if (sortedProducts.length === 0) {
+                listEl.innerHTML = '<li class="text-gray-500">No sales data recorded yet.</li>';
+                return;
+            }
+
+            sortedProducts.forEach((product, index) => {
+                const listItem = document.createElement('li');
+                listItem.className = 'flex justify-between items-center p-3 rounded-lg border-b bg-gray-50';
+                
+                const rank = index + 1;
+                const rankColor = rank === 1 ? 'text-yellow-600' : rank === 2 ? 'text-gray-400' : rank === 3 ? 'text-amber-700' : 'text-gray-500';
+
+                listItem.innerHTML = `
+                    <div class="flex items-center">
+                        <span class="font-extrabold text-2xl mr-4 ${rankColor}">#${rank}</span>
+                        <span class="font-medium">${product.name}</span>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-sm font-semibold">${product.totalQuantity} Sold</span>
+                        <p class="text-xs text-gray-500">PKR ${product.totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })} Revenue</p>
+                    </div>
+                `;
+                listEl.appendChild(listItem);
+            });
+        }
 
 
         // --- Product Management (CRUD UI) ---
@@ -520,22 +584,31 @@
             });
         }
         
+        // --- REFINED openProductModal function ---
         function openProductModal(mode, productId = null) {
             const titleEl = document.getElementById('product-modal-title');
             const form = document.getElementById('product-form');
             form.reset();
             currentEditingProductId = productId;
             
-            document.getElementById('product-img-file').required = (mode === 'add');
+            // Reset progress bars and clear file inputs visually
             document.querySelector('#progress-img > div').style.width = '0%';
             document.querySelector('#progress-img2 > div').style.width = '0%';
-            
+            document.getElementById('product-img-file').value = ''; 
+            document.getElementById('product-img2-file').value = '';
+
             if (mode === 'add') {
                 titleEl.textContent = 'Add New Product';
+                // New product MUST upload images
+                document.getElementById('product-img-file').required = true;
                 document.getElementById('product-img').value = '';
                 document.getElementById('product-img2').value = '';
-            } else {
+            } else { // Edit Mode
                 titleEl.textContent = 'Edit Product';
+                // Existing product image upload is OPTIONAL
+                document.getElementById('product-img-file').required = false;
+
+                // Fetch product data and populate form fields
                 db.collection('products').doc(productId).get().then(doc => {
                     if (doc.exists) {
                         const data = doc.data();
@@ -544,6 +617,7 @@
                         document.getElementById('product-stock').value = data.stock;
                         document.getElementById('product-featured').checked = data.featured;
                         
+                        // CRITICAL: Set current URLs in hidden fields. 
                         document.getElementById('product-img').value = data.img;
                         document.getElementById('product-img2').value = data.img2 || '';
                         
@@ -624,7 +698,7 @@
             }
         }
         
-        // --- Orders Management ---
+        // --- Orders Management (UPDATED with Delete Function) ---
         function renderOrdersTable(docs) {
             const tbody = document.getElementById('orders-table-body');
             tbody.innerHTML = '';
@@ -667,7 +741,8 @@
                         <option value="Delivered" ${order.status === 'Delivered' ? 'selected' : ''}>Delivered</option>
                         <option value="Canceled" ${order.status === 'Canceled' ? 'selected' : ''}>Canceled</option>
                     </select>
-                    <button onclick="viewOrderDetails('${doc.id}')" class="text-indigo-600 hover:text-indigo-900 ml-3">Details</button>`;
+                    <button onclick="viewOrderDetails('${doc.id}')" class="text-indigo-600 hover:text-indigo-900 ml-3">Details</button>
+                    <button onclick="deleteOrder('${doc.id}')" class="text-red-600 hover:text-red-900 ml-3">Delete</button>`;
             });
         }
         
@@ -677,7 +752,21 @@
                 .catch(error => console.error("Error updating order status:", error));
         }
 
-        // --- Order Details Modal Functions ---
+        // --- NEW Delete Order Function ---
+        function deleteOrder(orderId) {
+            if (confirm("WARNING: Are you sure you want to permanently delete this order? This action cannot be undone.")) {
+                db.collection('orders').doc(orderId).delete()
+                    .then(() => {
+                        console.log("Order deleted successfully:", orderId);
+                    })
+                    .catch(error => {
+                        console.error("Error deleting order:", error);
+                        alert("Failed to delete order. Check console for details.");
+                    });
+            }
+        }
+        
+        // --- Order Details Modal Functions (VERIFIED) ---
 
         function closeOrderDetailsModal() {
             document.getElementById('order-details-modal-overlay').classList.add('hidden');
@@ -714,11 +803,14 @@
                 document.getElementById('detail-city-state').textContent = `${address.city}, ${address.postalCode}`;
                 document.getElementById('detail-country').textContent = address.country;
 
-                // 3. Populate Items Table
+                // 3. Populate Items Table (This is the verified section that pulls item details)
                 order.items.forEach(item => {
                     const row = itemsTable.insertRow();
+                    // Column 1: Product Name (item.title)
                     row.insertCell().textContent = item.title;
+                    // Column 2: Quantity (item.quantity)
                     row.insertCell().textContent = item.quantity;
+                    // Column 3: Price (formatted)
                     row.insertCell().innerHTML = `<p class="text-right">PKR ${item.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>`;
                 });
                 
